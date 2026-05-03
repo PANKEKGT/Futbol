@@ -508,15 +508,28 @@ window.addEventListener('keydown', e => {
   }
 });
 
-// ── ANA DÖNGÜ ──
-function loop() {
+// ── ANA DÖNGÜ — sabit 60fps ──
+const TARGET_FPS = 60;
+const STEP_MS = 1000 / TARGET_FPS;
+let lastTime = 0;
+let accum = 0;
+
+function loop(ts) {
+  requestAnimationFrame(loop);
+  const dt = Math.min(ts - lastTime, 50); // max 50ms (sekme gizliyken spike'ı önle)
+  lastTime = ts;
+  accum += dt;
+  // Birden fazla kare birikirse hepsini işle (hız tutarlı kalsın)
+  while (accum >= STEP_MS) {
+    if (screen === 'game') gameStep();
+    accum -= STEP_MS;
+  }
   ctx.clearRect(0,0,W,H);
   if (screen==='menu') drawMenuScreen(mx,my);
   else if (screen==='difficulty') drawDiffScreen(mx,my);
-  else if (screen==='game') { gameStep(); drawGame(); }
-  requestAnimationFrame(loop);
+  else if (screen==='game') drawGame();
 }
-loop();
+requestAnimationFrame(loop);
 </script>
 </body>
 </html>
