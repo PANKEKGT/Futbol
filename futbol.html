@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<title>2D Futbol</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#111; display:flex; justify-content:center; align-items:center; height:100vh; overflow:hidden; }
+canvas { display:block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+// Ekrana sığdır
+const BASE_W = 900, BASE_H = 560;
+function resize() {
+  const scaleX = window.innerWidth / BASE_W;
+  const scaleY = window.innerHeight / BASE_H;
+  const scale = Math.min(scaleX, scaleY);
+  canvas.width  = BASE_W;
+  canvas.height = BASE_H;
+  canvas.style.width  = (BASE_W * scale) + 'px';
+  canvas.style.height = (BASE_H * scale) + 'px';
+}
+resize();
+window.addEventListener('resize', resize);
+
+const W = BASE_W, H = BASE_H;
+
+// Sabit değerler
+const PAD_X = Math.floor(W * 0.055);
+const PAD_Y = Math.floor(H * 0.10);
+const FX = PAD_X, FY = PAD_Y;
+const FW = W - PAD_X * 2;
+const FH = H - PAD_Y * 2 - Math.floor(H * 0.02);
+
+const GD   = Math.floor(W * 0.036);  // kale derinliği
+const GHO  = Math.floor(FH * 0.24);  // ağız yüksekliği
+const GHB  = Math.floor(FH * 0.38);  // arka yüksekliği
+
+const LOT = FY + Math.floor((FH - GHO) / 2); // sol açık üst
+const LOB = LOT + GHO;                         // sol açık alt
+const LBT = FY + Math.floor((FH - GHB) / 2); // sol arka üst
+const LBB = LBT + GHB;
+const LOX = FX;
+const LBX = FX - GD;
+
+const ROT = LOT, ROB = LOB, RBT = LBT, RBB = LBB;
+const ROX = FX + FW;
+const RBX = FX + FW + GD;
+
+// Renk sabitleri
+const C_GREEN_D = '#1e641e';
+const C_GREEN_L = '#237723';
+const C_WHITE   = '#ffffff';
+const C_BLUE    = '#3c82ff';
+const C_BLUE_D  = '#1e50c8';
+const C_RED     = '#dc3232';
+const C_RED_D   = '#a01414';
+const C_YELLOW  = '#ffdc00';
+const C_GRAY    = '#b4b4b4';
+const C_DARK_BG = '#0f280f';
+
+function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+function dist(ax,ay,bx,by){return Math.hypot(ax-bx,ay-by);}
+function lerp(a,b,t){return a+(b-a)*t;}
+
+// ── GİRDİ ──
+const keys = {};
+window.addEventListener('keydown', e => { keys[e.code] = true;  e.preventDefault(); });
+window.addEventListener('keyup',   e => { keys[e.code] = false; });
+
+// ── TOP ──
+class Ball {
+  constructor() {
+    this.r = Math.max(7, Math.floor(H * 0.013));
+    this.reset();
+  }
+  reset() { this.x=W/2; this.y=H/2; this.vx=0; this.vy=0; this.spin=0; }
+  update() {
+    this.vx *= 0.984; this.vy *= 0.984; this.spin *= 0.96;
+    this.x += this.vx; this.y += this.vy;
+
+    if (this.y - this.r < FY) { this.y = FY + this.r; this.vy *= -0.65; }
+    if (this.y + this.r > FY + FH) { this.y = FY+FH-this.r; this.vy *= -0.65; }
+
+    // Sol duvar
+    if (this.x - this.r < LOX) {
+      if (this.y < LOT || this.y > LOB) {
+        this.x = LOX + this.r; this.vx *= -0.65;
+      } else {
+        if (this.x - this.r < LBX) { this.x = LBX + this.r; this.vx *= -0.55; }
+        const t = clamp((this.x - LOX) / (LBX - LOX), 0, 1);
+        const gt = lerp(LOT, LBT, t), gb = lerp(LOB, LBB, t);
+        if (this.y - this.r < gt) { this.y = gt + this.r; this.vy *= -0.55; }
+        if (this.y + this.r > gb) { this.y = gb - this.r; this.vy *= -0.55; }
+      }
+    }
+    // Sağ duvar
+    if (this.x + this.r > ROX) {
+      if (this.y < ROT || this.y > ROB) {
+        this.x = ROX - this.r; this.vx *= -0.65;
+      } else {
+        if (this.x + this.r > RBX) { this.x = RBX - this.r; this.vx *= -0.55; }
+        const t = clamp((this.x - ROX) / (RBX - ROX), 0, 1);
+        const gt = lerp(ROT, RBT, t), gb = lerp(ROB, RBB, t);
+        if (this.y - this.r < gt) { this.y = gt + this.r; this.vy *= -0.55; }
+        if (this.y + this.r > gb) { this.y = gb - this.r; this.vy *= -0.55; }
+      }
+    }
+  }
+  draw() {
+    ctx.beginPath(); ctx.arc(this.x, this.y, this.r, 0, Math.PI*2);
+    ctx.fillStyle = C_WHITE; ctx.fill();
+    ctx.strokeStyle = '#222'; ctx.lineWidth = 2; ctx.stroke();
+    for (let i=0;i<5;i++) {
+      const a = this.spin + i * (Math.PI*2/5);
+      const px = this.x + Math.cos(a)*this.r*0.55;
+      const py = this.y + Math.sin(a)*this.r*0.55;
+      ctx.beginPath(); ctx.arc(px,py,Math.max(2,this.r/5),0,Math.PI*2);
+      ctx.fillStyle='#333'; ctx.fill();
+    }
+  }
+}
+
+// ── OYUNCU ──
+class Player {
+  constructor(x, y, color, darkColor, number) {
+    this.x=x; this.y=y; this.vx=0; this.vy=0;
+    this.r = Math.max(12, Math.floor(H*0.020));
+    this.color=color; this.dark=darkColor; this.number=String(number);
+    this.kickCd=0; this.frozen=false;
+  }
+  constrain() {
+    this.x = clamp(this.x, FX+this.r, FX+FW-this.r);
+    this.y = clamp(this.y, FY+this.r, FY+FH-this.r);
+  }
+  collideBall(ball) {
+    if (this.frozen) return;
+    const d = dist(this.x,this.y,ball.x,ball.y);
+    const md = this.r + ball.r;
+    if (d < md && d > 0.01) {
+      const nx=(ball.x-this.x)/d, ny=(ball.y-this.y)/d;
+      ball.x += nx*(md-d); ball.y += ny*(md-d);
+      const rel = (this.vx-ball.vx)*nx + (this.vy-ball.vy)*ny;
+      if (rel > 0) { ball.vx += nx*rel*1.2; ball.vy += ny*rel*1.2; }
+    }
+  }
+  collidePlayer(other) {
+    const d = dist(this.x,this.y,other.x,other.y);
+    const md = this.r+other.r;
+    if (d < md && d > 0.01) {
+      const nx=(other.x-this.x)/d, ny=(other.y-this.y)/d;
+      const ov=(md-d)/2;
+      this.x-=nx*ov; this.y-=ny*ov;
+      other.x+=nx*ov; other.y+=ny*ov;
+    }
+  }
+  kick(ball) {
+    if (this.kickCd > 0 || this.frozen) return;
+    if (dist(this.x,this.y,ball.x,ball.y) < this.r+ball.r+14) {
+      const dx=ball.x-this.x, dy=ball.y-this.y;
+      const dn=Math.hypot(dx,dy)||1;
+      ball.vx += (dx/dn)*8 + this.vx*0.4;
+      ball.vy += (dy/dn)*8 + this.vy*0.4;
+      ball.spin += ball.vx*0.06;
+      this.kickCd = 22;
+    }
+  }
+  draw() {
+    // Gölge
+    ctx.beginPath(); ctx.ellipse(this.x, this.y+this.r-2, this.r, 5, 0, 0, Math.PI*2);
+    ctx.fillStyle='rgba(0,60,0,0.5)'; ctx.fill();
+    // Gövde
+    ctx.beginPath(); ctx.arc(this.x,this.y,this.r,0,Math.PI*2);
+    ctx.fillStyle=this.color; ctx.fill();
+    ctx.strokeStyle=this.dark; ctx.lineWidth=3; ctx.stroke();
+    // Forma çizgisi
+    ctx.beginPath(); ctx.moveTo(this.x,this.y-this.r+3); ctx.lineTo(this.x,this.y+this.r-3);
+    ctx.strokeStyle=this.dark; ctx.lineWidth=2; ctx.stroke();
+    // Numara
+    ctx.fillStyle=C_WHITE; ctx.font=`bold ${Math.floor(this.r*0.9)}px monospace`;
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(this.number, this.x, this.y);
+    // Donmuş halkası
+    if (this.frozen) {
+      ctx.beginPath(); ctx.arc(this.x,this.y,this.r+5,0,Math.PI*2);
+      ctx.strokeStyle=C_YELLOW; ctx.lineWidth=3; ctx.stroke();
+    }
+  }
+}
+
+// ── YAPAY ZEKA ──
+class AIPlayer extends Player {
+  constructor(x, y, difficulty='orta') {
+    super(x, y, C_RED, C_RED_D, 9);
+    this.difficulty = difficulty;
+    this.thinkTimer = 0;
+    this.targetX = x; this.targetY = y;
+    if (difficulty === 'kolay') {
+      this.speed=1.6; this.thinkFreq=20; this.predMult=1;
+      this.aimError=80; this.kickPw=4.5; this.kickDelay=50; this.reactDist=80;
+    } else if (difficulty === 'zor') {
+      this.speed=3.8; this.thinkFreq=3; this.predMult=8;
+      this.aimError=8; this.kickPw=8.5; this.kickDelay=16; this.reactDist=9999;
+    } else {
+      this.speed=2.9; this.thinkFreq=10; this.predMult=3;
+      this.aimError=35; this.kickPw=6.0; this.kickDelay=28; this.reactDist=180;
+    }
+  }
+  update(ball) {
+    this.thinkTimer--;
+    if (this.thinkTimer <= 0) {
+      this.thinkTimer = this.thinkFreq + Math.floor(Math.random()*this.thinkFreq/2);
+      const d = dist(this.x,this.y,ball.x,ball.y);
+      if (d < this.reactDist || ball.x > W*0.4) {
+        this.targetX = ball.x + ball.vx*this.predMult;
+        this.targetY = ball.y + ball.vy*this.predMult;
+      } else {
+        this.targetX = FX + FW*0.62;
+        this.targetY = ball.y*0.7 + (FY+FH/2)*0.3;
+      }
+    }
+    const dx=this.targetX-this.x, dy=this.targetY-this.y;
+    const dn=Math.hypot(dx,dy)||1;
+    this.vx += (dx/dn)*this.speed*0.16;
+    this.vy += (dy/dn)*this.speed*0.16;
+    this.vx *= 0.86; this.vy *= 0.86;
+    this.x += this.vx; this.y += this.vy;
+    this.constrain();
+    if (this.kickCd > 0) this.kickCd--;
+    if (!this.frozen && dist(this.x,this.y,ball.x,ball.y) < this.r+ball.r+10 && this.kickCd===0) {
+      const dx2 = (LOX-5) - ball.x;
+      const dy2 = ((LOT+LOB)/2) - ball.y + (Math.random()-0.5)*2*this.aimError;
+      const dn2 = Math.hypot(dx2,dy2)||1;
+      const pw = this.kickPw + (Math.random()-0.5)*2;
+      ball.vx += (dx2/dn2)*pw; ball.vy += (dy2/dn2)*pw;
+      ball.spin += ball.vx*0.05; this.kickCd = this.kickDelay;
+    }
+  }
+}
+
+// ── ÇIZIM ──
+function drawGoals() {
+  // Sol kale
+  ctx.beginPath();
+  ctx.moveTo(LOX,LOT); ctx.lineTo(LBX,LBT); ctx.lineTo(LBX,LBB); ctx.lineTo(LOX,LOB);
+  ctx.closePath(); ctx.fillStyle='#145014'; ctx.fill();
+  // Sol ağ
+  for (let i=1;i<5;i++) {
+    const t=i/5;
+    const tx=lerp(LOX,LBX,t), ty1=lerp(LOT,LBT,t), ty2=lerp(LOB,LBB,t);
+    ctx.beginPath(); ctx.moveTo(tx,ty1); ctx.lineTo(tx,ty2);
+    ctx.strokeStyle='#828282'; ctx.lineWidth=1; ctx.stroke();
+  }
+  for (let i=1;i<4;i++) {
+    const t=i/4;
+    ctx.beginPath();
+    ctx.moveTo(LOX,lerp(LOT,LOB,t)); ctx.lineTo(LBX,lerp(LBT,LBB,t));
+    ctx.strokeStyle='#828282'; ctx.lineWidth=1; ctx.stroke();
+  }
+  ctx.beginPath(); ctx.moveTo(LOX,LOT); ctx.lineTo(LBX,LBT); ctx.strokeStyle=C_WHITE; ctx.lineWidth=3; ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(LOX,LOB); ctx.lineTo(LBX,LBB); ctx.strokeStyle=C_WHITE; ctx.lineWidth=3; ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(LBX,LBT); ctx.lineTo(LBX,LBB); ctx.strokeStyle=C_WHITE; ctx.lineWidth=3; ctx.stroke();
+
+  // Sağ kale
+  ctx.beginPath();
+  ctx.moveTo(ROX,ROT); ctx.lineTo(RBX,RBT); ctx.lineTo(RBX,RBB); ctx.lineTo(ROX,ROB);
+  ctx.closePath(); ctx.fillStyle='#145014'; ctx.fill();
+  for (let i=1;i<5;i++) {
+    const t=i/5;
+    const tx=lerp(ROX,RBX,t), ty1=lerp(ROT,RBT,t), ty2=lerp(ROB,RBB,t);
+    ctx.beginPath(); ctx.moveTo(tx,ty1); ctx.lineTo(tx,ty2);
+    ctx.strokeStyle='#828282'; ctx.lineWidth=1; ctx.stroke();
+  }
+  for (let i=1;i<4;i++) {
+    const t=i/4;
+    ctx.beginPath();
+    ctx.moveTo(ROX,lerp(ROT,ROB,t)); ctx.lineTo(RBX,lerp(RBT,RBB,t));
+    ctx.strokeStyle='#828282'; ctx.lineWidth=1; ctx.stroke();
+  }
+  ctx.beginPath(); ctx.moveTo(ROX,ROT); ctx.lineTo(RBX,RBT); ctx.strokeStyle=C_WHITE; ctx.lineWidth=3; ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(ROX,ROB); ctx.lineTo(RBX,RBB); ctx.strokeStyle=C_WHITE; ctx.lineWidth=3; ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(RBX,RBT); ctx.lineTo(RBX,RBB); ctx.strokeStyle=C_WHITE; ctx.lineWidth=3; ctx.stroke();
+}
+
+function drawField() {
+  for (let i=0;i<8;i++) {
+    ctx.fillStyle = i%2===0 ? C_GREEN_D : C_GREEN_L;
+    ctx.fillRect(FX+i*Math.floor(FW/8), FY, Math.floor(FW/8)+1, FH);
+  }
+  drawGoals();
+  ctx.strokeStyle=C_WHITE; ctx.lineWidth=2;
+  ctx.strokeRect(FX,FY,FW,FH);
+  ctx.beginPath(); ctx.moveTo(W/2,FY); ctx.lineTo(W/2,FY+FH); ctx.stroke();
+  ctx.beginPath(); ctx.arc(W/2,FY+FH/2,FH*0.18,0,Math.PI*2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(W/2,FY+FH/2,4,0,Math.PI*2); ctx.fillStyle=C_WHITE; ctx.fill();
+  const bw=Math.floor(FW*0.12), bh=Math.floor(FH*0.55);
+  const by=FY+Math.floor((FH-bh)/2);
+  ctx.lineWidth=1;
+  ctx.strokeRect(FX,by,bw,bh);
+  ctx.strokeRect(FX+FW-bw,by,bw,bh);
+  const pd=Math.floor(FW*0.10);
+  ctx.beginPath(); ctx.arc(FX+pd,FY+FH/2,3,0,Math.PI*2); ctx.fillStyle=C_WHITE; ctx.fill();
+  ctx.beginPath(); ctx.arc(FX+FW-pd,FY+FH/2,3,0,Math.PI*2); ctx.fillStyle=C_WHITE; ctx.fill();
+}
+
+function drawScore(score, timer, mode, difficulty) {
+  ctx.fillStyle='rgba(0,0,0,0.65)';
+  ctx.fillRect(0,0,W,PAD_Y-4);
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.font=`bold ${Math.floor(H*0.07)}px monospace`;
+  ctx.fillStyle=C_BLUE; ctx.fillText(score[0], W/2-W*0.07, PAD_Y/2);
+  ctx.fillStyle=C_GRAY;  ctx.fillText('-', W/2, PAD_Y/2);
+  ctx.fillStyle=C_RED;   ctx.fillText(score[1], W/2+W*0.07, PAD_Y/2);
+  const mins=Math.floor(timer/3600), secs=Math.floor((timer/60)%60);
+  ctx.font=`${Math.floor(H*0.02)}px monospace`; ctx.fillStyle=C_GRAY;
+  ctx.fillText(`${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}`, W/2, PAD_Y-Math.floor(H*0.014));
+  let hint = mode==='ai'
+    ? `WASD: hareket | SPACE: sut | Zorluk: ${{kolay:'Kolay',orta:'Orta',zor:'Zor'}[difficulty]} | ESC: menu`
+    : 'Mavi: WASD+SPACE  |  Kirmizi: Ok+Enter  |  ESC: menu';
+  ctx.fillStyle=C_GRAY; ctx.font=`${Math.floor(H*0.018)}px monospace`;
+  ctx.fillText(hint, W/2, H-Math.floor(H*0.02));
+}
+
+function showMessage(text) {
+  ctx.font=`bold ${Math.floor(H*0.044)}px monospace`;
+  const tw=ctx.measureText(text).width;
+  ctx.fillStyle='rgba(0,0,0,0.7)';
+  ctx.fillRect(W/2-tw/2-15, H/2-Math.floor(H*0.044)/2-10, tw+30, Math.floor(H*0.044)+20);
+  ctx.fillStyle=C_YELLOW; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(text, W/2, H/2);
+}
+
+function resetPos(p1,p2) {
+  p1.x=FX+FW*0.25; p1.y=H/2; p1.vx=p1.vy=0;
+  p2.x=FX+FW*0.75; p2.y=H/2; p2.vx=p2.vy=0;
+}
+
+// ── EKRANLAR ──
+let screen = 'menu'; // menu | difficulty | game
+let gameMode = null;  // 'ai' | '2p'
+let difficulty = 'orta';
+
+// Buton yardımcısı
+function makeBtn(label, x, y, w, h) { return {label,x,y,w,h}; }
+function isHover(btn, mx, my) { return mx>=btn.x && mx<=btn.x+btn.w && my>=btn.y && my<=btn.y+btn.h; }
+function drawBtn(btn, mx, my, color, hoverColor, textColor='#fff') {
+  const hov = isHover(btn,mx,my);
+  ctx.fillStyle = hov ? hoverColor : color;
+  ctx.beginPath(); ctx.roundRect(btn.x,btn.y,btn.w,btn.h,14); ctx.fill();
+  ctx.strokeStyle=C_WHITE; ctx.lineWidth=2; ctx.stroke();
+  ctx.fillStyle = hov ? '#000' : textColor;
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.font=`bold ${Math.floor(H*0.044)}px monospace`;
+  ctx.fillText(btn.label, btn.x+btn.w/2, btn.y+btn.h/2);
+}
+
+// ── MENÜ çizimi ──
+const menuBtns = [
+  makeBtn('Yapay Zekaya Karsi Oyna', W/2-W*0.19, H*0.48, W*0.38, H*0.09),
+  makeBtn('2 Kisilik Oyna',          W/2-W*0.19, H*0.61, W*0.38, H*0.09),
+];
+const diffBtns = [
+  makeBtn('Kolay', W/2-W*0.16, H*0.40, W*0.32, H*0.10),
+  makeBtn('Orta',  W/2-W*0.16, H*0.54, W*0.32, H*0.10),
+  makeBtn('Zor',   W/2-W*0.16, H*0.68, W*0.32, H*0.10),
+];
+
+function drawMenuScreen(mx,my) {
+  ctx.fillStyle=C_DARK_BG; ctx.fillRect(0,0,W,H);
+  for (let i=0;i<8;i++) {
+    ctx.fillStyle=i%2===0?'#195019':'#1e601e';
+    ctx.fillRect(i*W/8,0,W/8+1,H);
+  }
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.font=`bold ${Math.floor(H*0.09)}px monospace`; ctx.fillStyle=C_YELLOW;
+  ctx.fillText('2D FUTBOL', W/2, H*0.20);
+  ctx.beginPath(); ctx.arc(W/2,H*0.36,H*0.055,0,Math.PI*2);
+  ctx.fillStyle=C_WHITE; ctx.fill(); ctx.strokeStyle='#222'; ctx.lineWidth=3; ctx.stroke();
+  drawBtn(menuBtns[0],mx,my,'#288228','#50c850');
+  drawBtn(menuBtns[1],mx,my,'#288228','#50c850');
+  ctx.font=`${Math.floor(H*0.02)}px monospace`; ctx.fillStyle=C_GRAY;
+  ctx.fillText('Mavi: WASD + SPACE   |   Kirmizi (2.oyuncu): Ok + Enter', W/2, H*0.93);
+}
+
+function drawDiffScreen(mx,my) {
+  ctx.fillStyle=C_DARK_BG; ctx.fillRect(0,0,W,H);
+  for (let i=0;i<8;i++) {
+    ctx.fillStyle=i%2===0?'#195019':'#1e601e';
+    ctx.fillRect(i*W/8,0,W/8+1,H);
+  }
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.font=`bold ${Math.floor(H*0.09)}px monospace`; ctx.fillStyle=C_YELLOW;
+  ctx.fillText('Zorluk Seviyesi', W/2, H*0.22);
+  drawBtn(diffBtns[0],mx,my,'#50b450','#78dc78');
+  drawBtn(diffBtns[1],mx,my,'#c8a428','#f0cc50');
+  drawBtn(diffBtns[2],mx,my,'#c83c3c','#f05050');
+  ctx.font=`${Math.floor(H*0.02)}px monospace`; ctx.fillStyle=C_GRAY;
+  ctx.fillText('ESC: geri', W/2, H*0.90);
+}
+
+// ── OYUN ──
+let ball, p1, p2, score, goalTimer, goalTeam, matchTimer, scorer;
+
+function startGame(mode, diff) {
+  gameMode = mode; difficulty = diff;
+  ball = new Ball();
+  p1 = new Player(FX+FW*0.25, H/2, C_BLUE, C_BLUE_D, 10);
+  p2 = mode==='ai'
+    ? new AIPlayer(FX+FW*0.75, H/2, diff)
+    : new Player(FX+FW*0.75, H/2, C_RED, C_RED_D, 9);
+  score=[0,0]; goalTimer=0; goalTeam=-1; matchTimer=0; scorer=null;
+  screen='game';
+}
+
+function gameStep() {
+  matchTimer++;
+
+  // Kilit açma
+  if (scorer) {
+    const other = scorer===p1 ? p2 : p1;
+    if (dist(other.x,other.y,ball.x,ball.y) < other.r+ball.r+20) {
+      scorer.frozen=false; scorer=null;
+    }
+  }
+
+  // Oyuncu 1 — WASD + SPACE
+  if (goalTimer === 0) {
+    let mvx=(keys['KeyD']?1:0)-(keys['KeyA']?1:0);
+    let mvy=(keys['KeyS']?1:0)-(keys['KeyW']?1:0);
+    const n=Math.hypot(mvx,mvy)||1;
+    if (mvx||mvy) { p1.vx+=(mvx/n)*3.0*0.18; p1.vy+=(mvy/n)*3.0*0.18; }
+    p1.vx*=0.84; p1.vy*=0.84;
+    p1.x+=p1.vx; p1.y+=p1.vy; p1.constrain();
+    if (p1.kickCd>0) p1.kickCd--;
+    if (keys['Space']) p1.kick(ball);
+
+    // Oyuncu 2
+    if (gameMode==='ai') {
+      p2.update(ball);
+    } else {
+      let mvx2=(keys['ArrowRight']?1:0)-(keys['ArrowLeft']?1:0);
+      let mvy2=(keys['ArrowDown']?1:0)-(keys['ArrowUp']?1:0);
+      const n2=Math.hypot(mvx2,mvy2)||1;
+      if (mvx2||mvy2) { p2.vx+=(mvx2/n2)*3.0*0.18; p2.vy+=(mvy2/n2)*3.0*0.18; }
+      p2.vx*=0.84; p2.vy*=0.84;
+      p2.x+=p2.vx; p2.y+=p2.vy; p2.constrain();
+      if (p2.kickCd>0) p2.kickCd--;
+      if (keys['Enter']||keys['NumpadEnter']) p2.kick(ball);
+    }
+
+    p1.collideBall(ball); p2.collideBall(ball); p1.collidePlayer(p2);
+    ball.update();
+
+    // Gol kontrolü
+    if (ball.x < LOX && ball.y >= LOT && ball.y <= LOB) {
+      score[1]++; goalTeam=1; goalTimer=150;
+      if(scorer) scorer.frozen=false;
+      scorer=p2; scorer.frozen=true;
+      ball.reset(); resetPos(p1,p2);
+    } else if (ball.x > ROX && ball.y >= ROT && ball.y <= ROB) {
+      score[0]++; goalTeam=0; goalTimer=150;
+      if(scorer) scorer.frozen=false;
+      scorer=p1; scorer.frozen=true;
+      ball.reset(); resetPos(p1,p2);
+    }
+  }
+  if (goalTimer>0) goalTimer--;
+}
+
+function drawGame() {
+  ctx.fillStyle='#143c14'; ctx.fillRect(0,0,W,H);
+  drawField();
+  p1.draw(); p2.draw(); ball.draw();
+  drawScore(score, matchTimer, gameMode, difficulty);
+  if (goalTimer>0) showMessage(`GOL! - ${goalTeam===0?'Mavi':'Kirmizi'} Takim`);
+}
+
+// ── FARE / TIKLAMA ──
+let mx=0,my=0;
+canvas.addEventListener('mousemove', e => {
+  const r=canvas.getBoundingClientRect();
+  const scaleX=BASE_W/r.width, scaleY=BASE_H/r.height;
+  mx=(e.clientX-r.left)*scaleX; my=(e.clientY-r.top)*scaleY;
+});
+canvas.addEventListener('click', e => {
+  const r=canvas.getBoundingClientRect();
+  const scaleX=BASE_W/r.width, scaleY=BASE_H/r.height;
+  const cx=(e.clientX-r.left)*scaleX, cy=(e.clientY-r.top)*scaleY;
+  if (screen==='menu') {
+    if (isHover(menuBtns[0],cx,cy)) screen='difficulty';
+    if (isHover(menuBtns[1],cx,cy)) startGame('2p',null);
+  } else if (screen==='difficulty') {
+    if (isHover(diffBtns[0],cx,cy)) startGame('ai','kolay');
+    if (isHover(diffBtns[1],cx,cy)) startGame('ai','orta');
+    if (isHover(diffBtns[2],cx,cy)) startGame('ai','zor');
+  }
+});
+window.addEventListener('keydown', e => {
+  if (e.code==='Escape') {
+    if (screen==='game') screen='menu';
+    else if (screen==='difficulty') screen='menu';
+  }
+});
+
+// ── ANA DÖNGÜ ──
+function loop() {
+  ctx.clearRect(0,0,W,H);
+  if (screen==='menu') drawMenuScreen(mx,my);
+  else if (screen==='difficulty') drawDiffScreen(mx,my);
+  else if (screen==='game') { gameStep(); drawGame(); }
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>
